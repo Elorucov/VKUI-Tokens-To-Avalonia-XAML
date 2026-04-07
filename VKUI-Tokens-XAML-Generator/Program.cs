@@ -42,9 +42,7 @@ namespace VKUI_Tokens_XAML_Generator
             sb.AppendLine("<ResourceDictionary xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">");
             sb.AppendLine("  <ResourceDictionary.ThemeDictionaries>");
             sb.AppendLine(WrapToXaml("Default", colorsForDark));
-            sb.AppendLine("  </ResourceDictionary.ThemeDictionaries>");
             sb.AppendLine("");
-            sb.AppendLine("  <ResourceDictionary.ThemeDictionaries>");
             sb.AppendLine(WrapToXaml("Light", colorsForLight));
             sb.AppendLine("  </ResourceDictionary.ThemeDictionaries>");
             sb.AppendLine("</ResourceDictionary>");
