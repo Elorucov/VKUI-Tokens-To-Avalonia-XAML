@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Security.AccessControl;
+using System.Text;
 using System.Text.Json;
 
 namespace VKUI_Tokens_XAML_Generator
@@ -33,6 +34,7 @@ namespace VKUI_Tokens_XAML_Generator
 
             Dictionary<string, string> colorsForLight = GetColorsFromTokens(lightJson);
             Dictionary<string, string> sizes = GetSizesFromTokens(lightJson);
+            Dictionary<string, string> fonts = GetFontsFromTokens(lightJson);
 
             // Dark
             var darkJson = await DownloadAndGetJsonAsync(VKUI_TOKENS_DARK_URL);
@@ -43,6 +45,7 @@ namespace VKUI_Tokens_XAML_Generator
 
             await SaveColorsXAMLAsync(colorsForLight, colorsForDark);
             await SaveTokensXAMLAsync("x:Double", "Sizes", sizes);
+            await SaveFontTokensXAMLAsync(fonts);
         }
 
         private static async Task<JsonDocument> DownloadAndGetJsonAsync(string jsonUrl)
@@ -69,6 +72,7 @@ namespace VKUI_Tokens_XAML_Generator
         {
             Dictionary<string, string> colors = new Dictionary<string, string>();
 
+            int i = 0;
             foreach (var element in jsonDoc.RootElement.GetProperty("color").EnumerateObject())
             {
                 if (element.Value.ValueKind == JsonValueKind.Object &&
@@ -84,9 +88,10 @@ namespace VKUI_Tokens_XAML_Generator
                     colors.Add($"{FixTokenName(element.Name)}Hover", hover);
                     colors.Add($"{FixTokenName(element.Name)}Active", active);
                 }
+                i++;
             }
 
-            Console.WriteLine($"Parsed {colors.Count} color token(-s).");
+            Console.WriteLine($"Parsed {i} color token(-s).");
             return colors.OrderBy(d => d.Key).ToDictionary();
         }
 
@@ -94,6 +99,7 @@ namespace VKUI_Tokens_XAML_Generator
         {
             Dictionary<string, string> sizes = new Dictionary<string, string>();
 
+            int i = 0;
             foreach (var element in jsonDoc.RootElement.GetProperty("size").EnumerateObject())
             {
                 if (element.Value.ValueKind == JsonValueKind.Object &&
@@ -109,10 +115,77 @@ namespace VKUI_Tokens_XAML_Generator
                     sizes.Add($"{FixTokenName(element.Name)}Regular", Convert.ToString(regular));
                     sizes.Add($"{FixTokenName(element.Name)}Compact", Convert.ToString(compact));
                 }
+                i++;
             }
 
-            Console.WriteLine($"Parsed {sizes.Count} size token(-s).");
-            return sizes.OrderBy(d => d.Key).ToDictionary();
+            Console.WriteLine($"Parsed {i} size token(-s).");
+            //return sizes.OrderBy(d => d.Key).ToDictionary();
+            return sizes;
+        }
+
+        private static Dictionary<string, string> GetFontsFromTokens(JsonDocument jsonDoc)
+        {
+            Dictionary<string, string> fonts = new Dictionary<string, string>();
+
+            int i = 0;
+            foreach (var element in jsonDoc.RootElement.GetProperty("font").EnumerateObject())
+            {
+                if (element.Value.ValueKind == JsonValueKind.Object &&
+                    element.Value.TryGetProperty("regular", out var regularJP))
+                {
+
+                    var metric = GetFontMetric(regularJP);
+                    (double fontSizeRegular, double lineHeightRegular, string fontWeightRegular) = metric;
+                    (double fontSizeCompact, double lineHeightCompact, string fontWeightCompact) = metric;
+
+                    if (element.Value.TryGetProperty("compact", out var compactJP))
+                    {
+                        (fontSizeCompact, lineHeightCompact, fontWeightCompact) = GetFontMetric(compactJP);
+                    }
+
+                    fonts.Add($"{FixFontTokenName(element.Name)}RegularFontSize", Convert.ToString(fontSizeRegular));
+                    fonts.Add($"{FixFontTokenName(element.Name)}RegularLineHeight", Convert.ToString(lineHeightRegular));
+                    fonts.Add($"{FixFontTokenName(element.Name)}RegularFontWeight", fontWeightRegular);
+
+                    fonts.Add($"{FixFontTokenName(element.Name)}CompactFontSize", Convert.ToString(fontSizeCompact));
+                    fonts.Add($"{FixFontTokenName(element.Name)}CompactLineHeight", Convert.ToString(lineHeightCompact));
+                    fonts.Add($"{FixFontTokenName(element.Name)}CompactFontWeight", fontWeightCompact);
+                }
+                i++;
+            }
+
+            Console.WriteLine($"Parsed {i} font token(-s).");
+            return fonts;
+        }
+
+        private static (double fontSize, double lineHeight, string fontWeight) GetFontMetric(JsonElement json)
+        {
+            double fontSize = 0;
+            double lineHeight = 0;
+            ushort fontWeightNumber = 0;
+
+            json.GetProperty("fontSize").TryGetDouble(out fontSize);
+            json.GetProperty("lineHeight").TryGetDouble(out lineHeight);
+
+            if (json.TryGetProperty("fontWeight", out var fw))
+            {
+                fw.TryGetUInt16(out fontWeightNumber);
+            }
+
+            string fontWeight = fontWeightNumber switch { 
+                100 => "Thin",
+                200 => "ExtraLight",
+                300 => "Light",
+                350 => "SemiLight",
+                500 => "Medium",
+                600 => "SemiBold",
+                700 => "Bold",
+                900 => "Black",
+                950 => "ExtraBlack",
+                _ => "Regular"
+            };
+
+            return (fontSize, lineHeight, fontWeight);
         }
 
         private static string ConvertToHexIfNeccessary(string name, string colorString)
@@ -146,6 +219,11 @@ namespace VKUI_Tokens_XAML_Generator
         private static string FixTokenName(string name)
         {
             return $"VK{name[0].ToString().ToUpper()}{name.Substring(1, name.Length - 1)}";
+        }
+
+        private static string FixFontTokenName(string name)
+        {
+            return $"VK{name[4].ToString().ToUpper()}{name.Substring(5, name.Length - 5)}";
         }
 
         private static string WrapToXamlColor(string name, Dictionary<string, string> brushResources)
@@ -207,11 +285,54 @@ namespace VKUI_Tokens_XAML_Generator
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("<ResourceDictionary xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">");
-            sb.AppendLine(WrapToXamlToken(resourceType, sizes));
+            sb.Append(WrapToXamlToken(resourceType, sizes));
             sb.AppendLine("</ResourceDictionary>");
 
             string xamlPath = Path.Combine(Environment.CurrentDirectory, $"{fileName}.axaml");
             Console.WriteLine($"Saving token resources to file <{xamlPath}>...");
+
+            File.WriteAllText(xamlPath, sb.ToString());
+        }
+
+        private static string WrapToFontXamlToken(Dictionary<string, string> fonts)
+        {
+            StringBuilder sb = new StringBuilder();
+
+            foreach (var resource in fonts)
+            {
+                string resourceType = string.Empty;
+
+                if (resource.Key.EndsWith("FontSize") || resource.Key.EndsWith("LineHeight"))
+                {
+                    resourceType = "x:Double";
+                } else if (resource.Key.EndsWith("FontWeight"))
+                {
+                    resourceType = "FontWeight";
+                }
+
+                sb.Append("  <");
+                sb.Append(resourceType);
+                sb.Append(" x:Key=\"");
+                sb.Append(resource.Key);
+                sb.Append("\">");
+                sb.Append(resource.Value);
+                sb.Append("</");
+                sb.Append(resourceType);
+                sb.Append(">\n");
+            }
+
+            return sb.ToString();
+        }
+
+        private static async Task SaveFontTokensXAMLAsync(Dictionary<string, string> fonts)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("<ResourceDictionary xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">");
+            sb.Append(WrapToFontXamlToken(fonts));
+            sb.AppendLine("</ResourceDictionary>");
+
+            string xamlPath = Path.Combine(Environment.CurrentDirectory, $"Fonts.axaml");
+            Console.WriteLine($"Saving font resources to file <{xamlPath}>...");
 
             File.WriteAllText(xamlPath, sb.ToString());
         }
