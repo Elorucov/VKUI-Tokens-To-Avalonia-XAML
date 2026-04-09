@@ -5,8 +5,8 @@ namespace VKUI_Tokens_XAML_Generator
 {
     internal class Program
     {
-        const string VKUI_TOKENS_LIGHT_URL = "https://unpkg.com/@vkontakte/vkui-tokens@latest/themes/vkontakteCom/index.json";
-        const string VKUI_TOKENS_DARK_URL = "https://unpkg.com/@vkontakte/vkui-tokens@latest/themes/vkontakteComDark/index.json";
+        const string VKUI_TOKENS_LIGHT_URL = "https://unpkg.com/@vkontakte/vkui-tokens@latest/themes/vkontakteCom/struct.json";
+        const string VKUI_TOKENS_DARK_URL = "https://unpkg.com/@vkontakte/vkui-tokens@latest/themes/vkontakteComDark/struct.json";
 
         static string workingDirectory;
 
@@ -28,29 +28,21 @@ namespace VKUI_Tokens_XAML_Generator
 
         private static async Task DoAsync()
         {
+            // Light
             var lightJson = await DownloadAndGetJsonAsync(VKUI_TOKENS_LIGHT_URL);
-            Dictionary<string, string> colorsForLight = GetColorsFromTokens(lightJson);
-            Console.WriteLine($"Parsed {colorsForLight.Count} color(-s).");
 
+            Dictionary<string, string> colorsForLight = GetColorsFromTokens(lightJson);
+            Dictionary<string, string> sizes = GetSizesFromTokens(lightJson);
+
+            // Dark
             var darkJson = await DownloadAndGetJsonAsync(VKUI_TOKENS_DARK_URL);
             Dictionary<string, string> colorsForDark = GetColorsFromTokens(darkJson);
-            Console.WriteLine($"Parsed {colorsForDark.Count} color(-s).");
 
-            if (colorsForLight.Count != colorsForDark.Count) Console.WriteLine("WARNING! Colors count for light and dark themes are not equal!");
+            lightJson.Dispose();
+            darkJson.Dispose();
 
-            StringBuilder sb = new StringBuilder();
-            sb.AppendLine("<ResourceDictionary xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">");
-            sb.AppendLine("  <ResourceDictionary.ThemeDictionaries>");
-            sb.AppendLine(WrapToXaml("Default", colorsForDark));
-            sb.AppendLine("");
-            sb.AppendLine(WrapToXaml("Light", colorsForLight));
-            sb.AppendLine("  </ResourceDictionary.ThemeDictionaries>");
-            sb.AppendLine("</ResourceDictionary>");
-
-            string xamlPath = Path.Combine(Environment.CurrentDirectory, "VKColors.axaml");
-            Console.WriteLine($"Saving to file <{xamlPath}>...");
-
-            File.WriteAllText(xamlPath, sb.ToString());
+            await SaveColorsXAMLAsync(colorsForLight, colorsForDark);
+            await SaveTokensXAMLAsync("x:Double", "Sizes", sizes);
         }
 
         private static async Task<JsonDocument> DownloadAndGetJsonAsync(string jsonUrl)
@@ -77,7 +69,7 @@ namespace VKUI_Tokens_XAML_Generator
         {
             Dictionary<string, string> colors = new Dictionary<string, string>();
 
-            foreach (var element in jsonDoc.RootElement.EnumerateObject())
+            foreach (var element in jsonDoc.RootElement.GetProperty("color").EnumerateObject())
             {
                 if (element.Value.ValueKind == JsonValueKind.Object &&
                     element.Value.TryGetProperty("normal", out var normalJP) &&
@@ -88,14 +80,39 @@ namespace VKUI_Tokens_XAML_Generator
                     string hover = ConvertToHexIfNeccessary($"{element.Name}.hover", hoverJP.GetString());
                     string active = ConvertToHexIfNeccessary($"{element.Name}.active", activeJP.GetString());
 
-                    colors.Add(FixColorName(element.Name), normal);
-                    colors.Add($"{FixColorName(element.Name)}Hover", hover);
-                    colors.Add($"{FixColorName(element.Name)}Active", active);
+                    colors.Add(FixTokenName(element.Name), normal);
+                    colors.Add($"{FixTokenName(element.Name)}Hover", hover);
+                    colors.Add($"{FixTokenName(element.Name)}Active", active);
                 }
             }
 
-            jsonDoc.Dispose();
+            Console.WriteLine($"Parsed {colors.Count} color token(-s).");
             return colors.OrderBy(d => d.Key).ToDictionary();
+        }
+
+        private static Dictionary<string, string> GetSizesFromTokens(JsonDocument jsonDoc)
+        {
+            Dictionary<string, string> sizes = new Dictionary<string, string>();
+
+            foreach (var element in jsonDoc.RootElement.GetProperty("size").EnumerateObject())
+            {
+                if (element.Value.ValueKind == JsonValueKind.Object &&
+                    element.Value.TryGetProperty("regular", out var regularJP))
+                {
+
+                    double regular = regularJP.GetDouble();
+                    double compact = regularJP.GetDouble(); // required
+
+                    element.Value.TryGetProperty("compact", out var compactJP);
+                    if (compactJP.ValueKind == JsonValueKind.Number) compactJP.TryGetDouble(out compact);
+
+                    sizes.Add($"{FixTokenName(element.Name)}Regular", Convert.ToString(regular));
+                    sizes.Add($"{FixTokenName(element.Name)}Compact", Convert.ToString(compact));
+                }
+            }
+
+            Console.WriteLine($"Parsed {sizes.Count} size token(-s).");
+            return sizes.OrderBy(d => d.Key).ToDictionary();
         }
 
         private static string ConvertToHexIfNeccessary(string name, string colorString)
@@ -126,17 +143,12 @@ namespace VKUI_Tokens_XAML_Generator
             throw new ApplicationException($"Color \"{name}\" is invalid: \"{colorString}\"!");
         }
 
-        private static string FixColorName(string name)
+        private static string FixTokenName(string name)
         {
-            if (name.StartsWith("vkontakte"))
-            {
-                return $"VK{name.Substring(2, name.Length - 2)}";
-            }
-
             return $"VK{name[0].ToString().ToUpper()}{name.Substring(1, name.Length - 1)}";
         }
 
-        private static string WrapToXaml(string name, Dictionary<string, string> brushResources)
+        private static string WrapToXamlColor(string name, Dictionary<string, string> brushResources)
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine($"    <ResourceDictionary x:Key=\"{name}\">");
@@ -152,6 +164,56 @@ namespace VKUI_Tokens_XAML_Generator
 
             sb.Append("    </ResourceDictionary>");
             return sb.ToString();
+        }
+
+        private static async Task SaveColorsXAMLAsync(Dictionary<string, string> lightColors, Dictionary<string, string> darkColors)
+        {
+            if (lightColors.Count != darkColors.Count) Console.WriteLine("WARNING! Colors count for light and dark themes are not equal!");
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("<ResourceDictionary xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">");
+            sb.AppendLine("  <ResourceDictionary.ThemeDictionaries>");
+            sb.AppendLine(WrapToXamlColor("Default", darkColors));
+            sb.AppendLine("");
+            sb.AppendLine(WrapToXamlColor("Light", lightColors));
+            sb.AppendLine("  </ResourceDictionary.ThemeDictionaries>");
+            sb.AppendLine("</ResourceDictionary>");
+
+            string xamlPath = Path.Combine(Environment.CurrentDirectory, "Colors.axaml");
+            Console.WriteLine($"Saving color resources to file <{xamlPath}>...");
+
+            File.WriteAllText(xamlPath, sb.ToString());
+        }
+
+        private static string WrapToXamlToken(string resourceType, Dictionary<string, string> brushResources)
+        {
+            StringBuilder sb = new StringBuilder();
+
+            foreach (var resource in brushResources)
+            {
+                sb.Append("  <");
+                sb.Append(resourceType);
+                sb.Append(" x:Key=\"");
+                sb.Append(resource.Key);
+                sb.Append("\" Color=\"");
+                sb.Append(resource.Value);
+                sb.Append("\"/>\n");
+            }
+
+            return sb.ToString();
+        }
+
+        private static async Task SaveTokensXAMLAsync(string resourceType, string fileName, Dictionary<string, string> sizes)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("<ResourceDictionary xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">");
+            sb.AppendLine(WrapToXamlToken(resourceType, sizes));
+            sb.AppendLine("</ResourceDictionary>");
+
+            string xamlPath = Path.Combine(Environment.CurrentDirectory, $"{fileName}.axaml");
+            Console.WriteLine($"Saving token resources to file <{xamlPath}>...");
+
+            File.WriteAllText(xamlPath, sb.ToString());
         }
     }
 }
