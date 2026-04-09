@@ -273,9 +273,11 @@ namespace VKUI_Tokens_XAML_Generator
                 sb.Append(resourceType);
                 sb.Append(" x:Key=\"");
                 sb.Append(resource.Key);
-                sb.Append("\" Color=\"");
+                sb.Append("\">");
                 sb.Append(resource.Value);
-                sb.Append("\"/>\n");
+                sb.Append("</");
+                sb.Append(resourceType);
+                sb.Append(">\n");
             }
 
             return sb.ToString();
